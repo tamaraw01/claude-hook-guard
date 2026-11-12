@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "$schema": "https://example.com/hook.json",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ["python3", "guard.py"]
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 stop.py"
+          }
+        ]
+      }
+    ]
+  }
+}

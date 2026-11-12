@@ -1,0 +1,3 @@
+{"tool_name": "Bash", "tool_input": {"command": "cd /tmp && rm -rf /var/tmp/demo"}}
+{"tool_name": "Read", "tool_input": {"file_path": ".env.production"}}
+{"tool_name": "Bash", "tool_input": {"command": "git status && pytest -q"}}
