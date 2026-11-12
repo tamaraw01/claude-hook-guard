@@ -4,6 +4,20 @@ Deterministic Python 3.10+ CLI that lints Claude Code hook settings (`.claude/se
 
 Note: This Python package is unrelated to the third-party `claude-hook-guard` package on npm. Do not install via `npx`.
 
+## Packaged Releases
+
+- Packaged ZIP release (`$0+` MIT): [Download claude-hook-guard on Gumroad](https://aditama1.gumroad.com/l/claude-hook-guard)
+- Tested hook scripts & CI workflows: [Claude Code Guardrails Kit ($39 / $79 / $149)](https://aditama1.gumroad.com/l/claude-hook-guard-kit) (use code `HOOKS20` for 20% off Pro `$79` or Team `$149`)
+
+| Tier | Price | What Is Included |
+|---|---:|---|
+| **[claude-hook-guard](https://aditama1.gumroad.com/l/claude-hook-guard)** | **$0+** | This MIT CLI (`lint`, `simulate`, `doctor`) as a packaged ZIP |
+| **[Solo Guardrails](https://aditama1.gumroad.com/l/claude-hook-guard-kit)** | **$39** | `PreToolUse` destructive-shell guard, `.env` and credential file-boundary guard, GitHub Actions + `pre-commit` recipes, starter `settings.json` config pack (22 files) |
+| **[Guardrails Pro (Recommended)](https://aditama1.gumroad.com/l/claude-hook-guard-kit)** | **$79** | Everything in Solo + compound bash splitter, `PostToolUse` secret redactor, hardened `Stop` gate pack, JSONL replay suite, `updatedInput` conflict checker (28 files, `$63.20` with `HOOKS20`) |
+| **[Team & CI Governance](https://aditama1.gumroad.com/l/claude-hook-guard-kit)** | **$149** | Everything in Pro + 5-seat commercial license, multi-repo org policy pack, org CI matrix workflow (34 files, `$119.20` with `HOOKS20`) |
+
+Every paid tier has a 14-day refund policy.
+
 ## Quick start
 
 Run directly from the unpacked archive or repo without installing anything:
