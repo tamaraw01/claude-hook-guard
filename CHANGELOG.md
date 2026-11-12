@@ -1,8 +1,7 @@
 # Changelog
 
-## 1.0.0 (2026-11-12)
+## 1.0.0
 
-- Initial MIT release of `claude-hook-guard`.
-- Added `lint` command for `.claude/settings.json`, `.claude/settings.local.json`, and `hooks/hooks.json` (`CHG001` through `CHG007`).
-- Added `simulate` command for local `PreToolUse` JSONL replay, compound shell splitting (`&&`, `||`, `;`, `|`), destructive command checks, `.env` / credential access checks, and optional `--exec` hook runner with `updatedInput` conflict detection.
-- Added `doctor` command and `scripts/check.sh` 1-command verification script.
+- Added `claude_hook_guard.cli` and `python -m claude_hook_guard` with `lint`, `simulate`, and `doctor` subcommands and `--format json`.
+- Updated linter to cover all 33 Claude Code hook events, 5 handler types (`command`, `http`, `prompt`, `agent`, `mcp_tool`), `CHG008` (matcher on no-matcher event), and `CHG009` (`if` on non-tool event).
+- Updated simulator matcher evaluation to match the Claude Code spec (exact list vs unanchored regex), added `args` exec-form and timeout reporting for `--exec-hooks`, and fixed newline splitting in `split_shell_segments` while keeping `2>&1` redirects intact.

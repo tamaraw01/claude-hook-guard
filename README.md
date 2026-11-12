@@ -1,44 +1,54 @@
 # claude-hook-guard
 
-Deterministic Python 3.10+ CLI that validates Claude Code hook configuration files (`.claude/settings.json`, `.claude/settings.local.json`, `hooks/hooks.json`) and simulates `PreToolUse` JSONL payloads locally without invoking Claude Code.
+Deterministic Python 3.10+ CLI that lints Claude Code hook settings (`.claude/settings.json`, `.claude/settings.local.json`, `hooks/hooks.json`) and simulates `PreToolUse` JSONL payloads offline. Zero external runtime dependencies.
 
-Distribution note: `claude-hook-guard` is a Python standard-library tool distributed via GitHub release ZIP and `python3 -m claude_hook_guard` (not published on npm or PyPI, and not affiliated with the unrelated `misty7kr/claude-hook-guard` npm package).
+Note: This Python package is unrelated to the third-party `claude-hook-guard` package on npm. Do not install via `npx`.
 
 ## Quick start
 
+Run directly from the unpacked archive or repo without installing anything:
+
 ```bash
-# 1. Run built-in health check
 PYTHONPATH=src python3 -m claude_hook_guard doctor
-
-# 2. Lint your Claude Code settings
-PYTHONPATH=src python3 -m claude_hook_guard lint .claude/settings.json
-
-# 3. Simulate PreToolUse JSONL payloads
-PYTHONPATH=src python3 -m claude_hook_guard simulate --input examples/payloads.jsonl
-
-# 4. Run full self-check and unit tests
-bash scripts/check.sh
+PYTHONPATH=src python3 -m claude_hook_guard simulate --builtin-suite
+PYTHONPATH=src python3 -m claude_hook_guard lint examples/settings.valid.json
 ```
 
-Or install into an isolated environment from the extracted folder:
+Or install into a virtual environment:
 
 ```bash
-pipx install .
+python3 -m pip install -e .
 claude-hook-guard doctor --format json
 ```
 
-## What it checks
+Run the self-check and unit tests in one command:
 
-### Linter rules (`lint`)
-- `CHG001` (error): `command` field is an array instead of a string (rejected by Claude Code 2.1.x schema).
-- `CHG002` (error): unknown hook event name.
-- `CHG003` (warn): unknown matcher group or handler keys (`$schema`, `id`, `description`) that cause startup warnings.
-- `CHG004` (error): missing required fields (`hooks`, `type`, `command`, `prompt`).
-- `CHG005` (warn): `PreToolUse` or `PostToolUse` placed in `.claude/settings.local.json`.
-- `CHG006` (warn): `Stop` hook present without verifying `stop_hook_active` and `-p` print-mode behavior.
-- `CHG007` (warn): multiple `PreToolUse` matchers targeting the same tool (risk of `updatedInput` conflicts).
+```bash
+bash scripts/check.sh
+```
 
-### Simulator (`simulate`)
-- Splits compound shell commands on `&&`, `||`, `;`, `|`, and newlines so leading `cd` commands do not mask trailing `rm -rf` or force-push operations.
-- Flags `.env`, `.dev.vars`, `.npmrc`, `.netrc`, SSH key, and AWS credential access across `Read`, `Grep`, `Glob`, and `Bash`.
-- With `--settings <file> --exec`, executes matching `PreToolUse` command hooks on stdin and flags exit code 2 blocks or multi-hook `updatedInput` conflicts.
+## Subcommands
+
+### `lint <path...> [--strict] [--format text|json]`
+
+Validates one or more settings JSON files (or directories of `.json` files) against the Claude Code hooks reference:
+
+- `CHG001`: invalid hook handler schema (for example `command` as an array instead of a string, missing `url` on `http`, missing `tool` on `mcp_tool`, or invalid `shell` value).
+- `CHG002`: unknown hook event name or unknown handler `type`.
+- `CHG003`: broad or risky `PreToolUse` matcher without a targeted guard.
+- `CHG004`: `Stop` hook present without a `stop_hook_active` loop guard.
+- `CHG005`: multiple `PreToolUse` command hooks that risk `updatedInput` conflicts.
+- `CHG008`: `matcher` set on an event that does not support matchers (`UserPromptSubmit`, `Stop`, etc.).
+- `CHG009`: `if` condition set on a non-tool event.
+
+Exit codes: `0` when valid, `1` when any error is found (or warning with `--strict`).
+
+### `simulate (--builtin-suite | --suite <jsonl>) [--settings <json>] [--exec-hooks] [--format text|json]`
+
+Replays `PreToolUse` JSONL payloads through the segment splitter (`&&`, `||`, `;`, `|`, `&`, and unquoted newlines) and checks for destructive shell commands (`rm -rf` outside safe paths) and `.env` / credential reads.
+
+Pass `--settings` with `--exec-hooks` to execute matching `command` hooks locally (supporting both shell string and `args` exec form, with timeout reporting). Non-command handlers (`http`, `prompt`, `agent`, `mcp_tool`) are skipped and reported in `reasons`.
+
+### `doctor [--format text|json]`
+
+Verifies Python version, imports, and the 3-case built-in regression suite.

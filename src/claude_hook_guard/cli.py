@@ -8,136 +8,141 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from claude_hook_guard import __version__
-from claude_hook_guard.linter import LintFinding, lint_settings_dict, lint_settings_file
-from claude_hook_guard.simulator import BUILTIN_PAYLOADS, analyze_payload, replay_jsonl_lines
+from . import __version__
+from .linter import LintFinding, lint_settings_file
+from .simulator import BUILTIN_PAYLOADS, SimulationResult, replay_jsonl_lines
 
 
-def _cmd_lint(args: argparse.Namespace) -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="claude-hook-guard",
+        description="Lint Claude Code hook settings and simulate PreToolUse payloads.",
+    )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    lint_p = sub.add_parser("lint", help="Lint Claude Code settings.json or hooks.json files")
+    lint_p.add_argument("paths", nargs="+", help="Settings JSON files or directories containing them")
+    lint_p.add_argument("--strict", action="store_true", help="Exit 1 on warnings as well as errors")
+    lint_p.add_argument("--format", choices=("text", "json"), default="text")
+
+    sim_p = sub.add_parser("simulate", help="Replay PreToolUse JSONL payloads against hook rules")
+    src_group = sim_p.add_mutually_exclusive_group(required=True)
+    src_group.add_argument("--suite", help="Path to a JSONL file of PreToolUse payloads")
+    src_group.add_argument("--builtin-suite", action="store_true", help="Run the 3 built-in regression payloads")
+    sim_p.add_argument("--settings", help="Optional settings.json/hooks.json for live hook execution")
+    sim_p.add_argument("--exec-hooks", action="store_true", help="Execute matching command hooks in --settings")
+    sim_p.add_argument("--format", choices=("text", "json"), default="text")
+
+    doc_p = sub.add_parser("doctor", help="Verify runtime environment and built-in self-checks")
+    doc_p.add_argument("--format", choices=("text", "json"), default="text")
+    return p
+
+
+def _expand_settings_paths(raw_paths: list[str]) -> list[Path]:
+    out: list[Path] = []
+    for raw in raw_paths:
+        p = Path(raw)
+        if p.is_dir():
+            out.extend(sorted(p.rglob("*.json")))
+        else:
+            out.append(p)
+    return out
+
+
+def _run_lint(paths: list[str], fmt: str, strict: bool) -> int:
     findings: list[LintFinding] = []
-    for target in args.paths:
+    targets = _expand_settings_paths(paths)
+    if not targets:
+        findings.append(LintFinding("CHG000", "error", "No JSON files found in target path(s).", paths[0]))
+    for target in targets:
         findings.extend(lint_settings_file(target))
 
     errors = sum(1 for f in findings if f.severity == "error")
-    warns = sum(1 for f in findings if f.severity == "warn")
-    ok = errors == 0 and (warns == 0 if args.strict else True)
+    warnings = sum(1 for f in findings if f.severity in ("warn", "warning"))
+    ok = errors == 0 and (not strict or warnings == 0)
 
-    if args.format == "json":
-        print(
-            json.dumps(
-                {
-                    "ok": ok,
-                    "errors": errors,
-                    "warnings": warns,
-                    "findings": [f.to_dict() for f in findings],
-                },
-                indent=2,
-            )
-        )
+    if fmt == "json":
+        print(json.dumps({
+            "ok": ok,
+            "version": __version__,
+            "summary": {"errors": errors, "warnings": warnings},
+            "findings": [f.to_dict() for f in findings],
+        }, indent=2))
     else:
         for f in findings:
-            print(f"[{f.severity.upper()}] {f.code} {f.source} ({f.path}): {f.message}")
-        print(f"Summary: {errors} error(s), {warns} warning(s)")
-
+            loc = f"{f.source}: {f.path}: " if f.path else f"{f.source}: "
+            print(f"{f.severity.upper()} {f.code} {loc}{f.message}")
+        print(f"Summary: {errors} errors, {warnings} warnings")
     return 0 if ok else 1
 
 
-def _cmd_simulate(args: argparse.Namespace) -> int:
-    if args.builtin_suite:
+def _load_settings(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _run_simulate(
+    suite_path: str | None,
+    builtin_suite: bool,
+    settings_path: str | None,
+    exec_hooks: bool,
+    fmt: str,
+) -> int:
+    if builtin_suite:
         lines = [json.dumps(p) for p in BUILTIN_PAYLOADS]
-    elif args.input:
-        lines = Path(args.input).read_text(encoding="utf-8").splitlines()
     else:
-        lines = sys.stdin.read().splitlines()
+        assert suite_path is not None
+        lines = Path(suite_path).read_text(encoding="utf-8").splitlines()
 
-    settings: dict[str, Any] | None = None
-    if args.settings:
-        settings = json.loads(Path(args.settings).read_text(encoding="utf-8"))
-
-    results = replay_jsonl_lines(lines, settings=settings, exec_hooks=bool(args.exec_hooks))
+    settings = _load_settings(settings_path)
+    results: list[SimulationResult] = replay_jsonl_lines(
+        lines,
+        settings=settings,
+        exec_hooks=exec_hooks,
+    )
     blocked = sum(1 for r in results if r.decision == "block")
-    allowed = len(results) - blocked
+    allowed = sum(1 for r in results if r.decision == "allow")
+    summary = {"total": len(results), "blocked": blocked, "allowed": allowed}
 
-    if args.format == "json":
-        print(
-            json.dumps(
-                {
-                    "summary": {"total": len(results), "blocked": blocked, "allowed": allowed},
-                    "results": [r.to_dict() for r in results],
-                },
-                indent=2,
-            )
-        )
+    if fmt == "json":
+        print(json.dumps({
+            "version": __version__,
+            "summary": summary,
+            "results": [r.to_dict() for r in results],
+        }, indent=2))
     else:
         for r in results:
-            reason_str = "; ".join(r.reasons) if r.reasons else "no hazards detected"
-            print(f"#{r.index} [{r.decision.upper()}] {r.tool_name}: {reason_str}")
-        print(f"Summary: {len(results)} payload(s), {blocked} blocked, {allowed} allowed")
+            reason_str = "; ".join(r.reasons) if r.reasons else "no policy match"
+            print(f"[{r.index}] {r.tool_name} -> {r.decision.upper()} ({reason_str})")
+        print(f"Summary: {len(results)} total, {blocked} blocked, {allowed} allowed")
+    return 0
 
-    return 1 if (args.fail_on_block and blocked > 0) else 0
 
-
-def _cmd_doctor(args: argparse.Namespace) -> int:
-    py_ok = sys.version_info >= (3, 10)
-    bad_sample = {
-        "hooks": {
-            "PreToolUse": [
-                {"matcher": "Bash", "hooks": [{"type": "command", "command": ["python3", "g.py"]}]}
-            ]
-        }
-    }
-    lint_hits = lint_settings_dict(bad_sample, source="doctor-sample.json")
-    sim_hit = analyze_payload({"tool_name": "Bash", "tool_input": {"command": "cd /tmp && rm -rf /"}})
-    ok = py_ok and any(f.code == "CHG001" for f in lint_hits) and sim_hit.decision == "block"
-
+def _run_doctor(fmt: str) -> int:
+    results = replay_jsonl_lines([json.dumps(p) for p in BUILTIN_PAYLOADS])
+    ok = len(results) == 3 and sum(1 for r in results if r.decision == "block") == 2
     payload = {
         "ok": ok,
         "version": __version__,
-        "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-        "checks": {
-            "python_3_10_plus": py_ok,
-            "linter_self_test": any(f.code == "CHG001" for f in lint_hits),
-            "simulator_self_test": sim_hit.decision == "block",
-        },
+        "python": sys.version.split()[0],
+        "builtin_suite_count": len(results),
     }
-    if args.format == "json":
+    if fmt == "json":
         print(json.dumps(payload, indent=2))
     else:
-        print(f"claude-hook-guard {__version__} (Python {payload['python']}): {'OK' if ok else 'FAIL'}")
+        status = "ok" if ok else "failed"
+        print(f"claude-hook-guard {__version__} {status} (python {payload['python']})")
     return 0 if ok else 1
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="claude-hook-guard",
-        description="Lint Claude Code hook settings and simulate PreToolUse JSONL payloads.",
-    )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    p_lint = sub.add_parser("lint", help="Validate .claude/settings.json or hooks/hooks.json")
-    p_lint.add_argument("paths", nargs="+", help="Settings or hooks.json file paths")
-    p_lint.add_argument("--format", choices=("text", "json"), default="text")
-    p_lint.add_argument("--strict", action="store_true", help="Exit 1 on warnings as well as errors")
-    p_lint.set_defaults(func=_cmd_lint)
-
-    p_sim = sub.add_parser("simulate", help="Simulate PreToolUse JSONL payloads")
-    p_sim.add_argument("--input", help="Path to JSONL file (reads stdin if omitted)")
-    p_sim.add_argument("--builtin-suite", action="store_true", help="Run built-in test payloads")
-    p_sim.add_argument("--settings", help="Optional settings.json for hook execution")
-    p_sim.add_argument("--exec", dest="exec_hooks", action="store_true", help="Execute matching PreToolUse command hooks")
-    p_sim.add_argument("--fail-on-block", action="store_true", help="Exit 1 if any payload is blocked")
-    p_sim.add_argument("--format", choices=("text", "json"), default="text")
-    p_sim.set_defaults(func=_cmd_simulate)
-
-    p_doc = sub.add_parser("doctor", help="Run environment and built-in self-check")
-    p_doc.add_argument("--format", choices=("text", "json"), default="text")
-    p_doc.set_defaults(func=_cmd_doctor)
-
-    return parser
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    return int(args.func(args))
+    args = _build_parser().parse_args(argv)
+    if args.cmd == "lint":
+        return _run_lint(args.paths, args.format, args.strict)
+    if args.cmd == "simulate":
+        return _run_simulate(args.suite, args.builtin_suite, args.settings, args.exec_hooks, args.format)
+    if args.cmd == "doctor":
+        return _run_doctor(args.format)
+    return 2

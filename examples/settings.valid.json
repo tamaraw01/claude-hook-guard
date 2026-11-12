@@ -6,8 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 guard.py",
-            "timeout": 10
+            "command": "python3 .claude/hooks/pretool_guard.py"
           }
         ]
       }
